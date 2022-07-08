@@ -1,15 +1,127 @@
 use lazy_static::lazy_static;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::collections::HashSet;
+use std::fs::read_to_string;
 use std::mem::MaybeUninit;
 use tinyvec::ArrayVec;
 
 lazy_static! {
     static ref PERMS: Vec<Vec<[bool; 8]>> = {
+        fn generate_perms(constraint: u32) -> impl Iterator<Item = u8> {
+            (0..=u8::MAX).filter(move |i| i.count_ones() == constraint)
+        }
+
+        fn get_values(walls_bin: u8) -> [bool; 8] {
+            let mut values = [false; 8];
+            for i in 0..8 {
+                values[i] = walls_bin & (1 << (7 - i)) != 0 as u8;
+            }
+            values
+        }
+
         (0..=8)
             .map(|n| generate_perms(n).map(|perm| get_values(perm)).collect())
             .collect()
     };
+}
+
+fn main() {
+    let s = read_to_string("./5.dd").unwrap();
+    let b = ParsedBoard::parse(&s);
+    let col_constraints = b.col_constraints;
+    let row_constraints = b.row_constraints;
+
+    let mut q = vec![Board::new()];
+    let mut found = vec![];
+    while let Some(mut q_item) = q.pop() {
+        if q_item.len() == 8 {
+            found.push(q_item);
+            continue;
+        }
+
+        for next_col in &PERMS[col_constraints[q_item.len()] as usize] {
+            let mut next_q_item = q_item;
+            next_q_item.push(*next_col);
+
+            if row_constraints
+                .into_iter()
+                .enumerate()
+                .all(|(row_index, constraint)| {
+                    next_q_item
+                        .iter()
+                        .map(|col| col[row_index] as u8)
+                        .sum::<u8>()
+                        <= constraint
+                })
+            {
+                q.push(next_q_item);
+            }
+        }
+    }
+    println!("- after filtering col and row constraints");
+    dbg!(found.len());
+
+    // filter out non-contiguous grids
+    let (contiguous, _noncontiguous): (Vec<Board>, Vec<Board>) =
+        found.into_par_iter().partition(|grid| is_contiguous(*grid));
+    println!("- after filtering out non-contiguous grids");
+    dbg!(contiguous.len());
+
+    // filter out grids that contain monsters where there are walls
+    let (monsters_filtered_out, monsters_overlapping): (Vec<_>, Vec<_>) =
+        contiguous.into_iter().partition(|board| {
+            board.iter().enumerate().all(|(x, col)| {
+                col.into_iter().enumerate().all(|(y, &cell)| {
+                    if cell {
+                        !b.monster_locations[x][y]
+                    } else {
+                        true
+                    }
+                })
+            })
+        });
+    println!("- after filtering out grids with walls overlapping monster positions");
+    dbg!(monsters_filtered_out.len());
+    println!("- example of monster not overlapping (GOOD)");
+    print_grid(monsters_filtered_out[0]);
+    println!("- example of monster overlapping (BAD)");
+    print_grid(monsters_overlapping[0]);
+}
+
+#[derive(Debug)]
+struct ParsedBoard {
+    col_constraints: [u8; 8],
+    row_constraints: [u8; 8],
+    monster_locations: [[bool; 8]; 8],
+}
+
+impl ParsedBoard {
+    fn parse(s: &str) -> Self {
+        let s = s.trim();
+        let mut lines = s.lines();
+        let first_line = lines.next().unwrap().trim();
+        let mut col_constraints = [0; 8];
+        for (i, char) in first_line.chars().enumerate() {
+            col_constraints[i] = char.to_digit(10).unwrap() as _;
+        }
+        let mut row_constraints = [0; 8];
+        let mut monster_locations = [[false; 8]; 8];
+        for (y, line) in lines.enumerate() {
+            let mut chars = line.trim().chars();
+            let first_char = chars.next().unwrap();
+            row_constraints[y] = first_char.to_digit(10).unwrap() as _;
+            for (x, rest) in chars.enumerate() {
+                if rest == 'm' {
+                    monster_locations[x][y] = true;
+                }
+            }
+        }
+        Self {
+            col_constraints,
+            row_constraints,
+            monster_locations,
+        }
+    }
 }
 
 enum Space {
@@ -17,18 +129,6 @@ enum Space {
     Wall,
     Monster,
     Treasure,
-}
-
-fn generate_perms(constraint: u32) -> impl Iterator<Item = u8> {
-    (0..=u8::MAX).filter(move |i| i.count_ones() == constraint)
-}
-
-fn get_values(walls_bin: u8) -> [bool; 8] {
-    let mut values = [false; 8];
-    for i in 0..8 {
-        values[i] = walls_bin & (1 << (7 - i)) != 0 as u8;
-    }
-    values
 }
 
 type Board = ArrayVec<[[bool; 8]; 8]>;
@@ -71,59 +171,6 @@ fn is_contiguous(b: Board) -> bool {
     }
 
     all_space_coordinates.intersection(&found_spaces).count() == all_space_coordinates.len()
-}
-
-fn main() {
-    // dbg!(&*PERMS);
-
-    let col_constraints = [2u8, 4, 4, 3, 2, 3, 4, 2];
-    let row_constraints = [0u8, 7, 2, 4, 2, 2, 7, 0];
-
-    let mut q = vec![Board::new()];
-    let mut found = vec![];
-    while let Some(mut q_item) = q.pop() {
-        if q_item.len() == 8 {
-            found.push(q_item);
-            continue;
-        }
-
-        for next_col in &PERMS[col_constraints[q_item.len()] as usize] {
-            let mut next_q_item = q_item;
-            next_q_item.push(*next_col);
-
-            if row_constraints
-                .into_iter()
-                .enumerate()
-                .all(|(row_index, constraint)| {
-                    next_q_item
-                        .iter()
-                        .map(|col| col[row_index] as u8)
-                        .sum::<u8>()
-                        <= constraint
-                })
-            {
-                q.push(next_q_item);
-            }
-        }
-    }
-    println!("- after filtering col and row constraints");
-    dbg!(found.len());
-
-    // filter out non-contiguous grids
-    let (contiguous, noncontiguous): (Vec<Board>, Vec<Board>) =
-        found.into_par_iter().partition(|grid| is_contiguous(*grid));
-    // for found in found {
-    //     print_grid(found);
-    //     println!();
-    // }
-    println!("- after filtering out non-contiguous grids");
-    dbg!(contiguous.len());
-    dbg!(noncontiguous.len());
-    println!("example of contiguous grid:");
-    print_grid(contiguous[0]);
-    println!();
-    println!("example of non-contiguous grid:");
-    print_grid(noncontiguous[0]);
 }
 
 fn print_grid(cols: ArrayVec<[[bool; 8]; 8]>) {
