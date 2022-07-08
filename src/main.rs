@@ -97,6 +97,60 @@ fn main() {
         .collect::<Vec<_>>();
     println!("- after filtering out grids with monsters not in dead ends");
     dbg!(with_monsters_in_dead_ends.len());
+
+    // keep only grids with all dead ends containing monsters
+    let with_all_dead_ends_containing_monsters = with_monsters_in_dead_ends
+        .into_iter()
+        .filter(|board| {
+            // filter only dead ends
+            let mut dead_ends = board.iter().enumerate().flat_map(|(x, col)| {
+                col.into_iter().enumerate().flat_map(move |(y, &cell)| {
+                    if !cell {
+                        let nbors = neighbors((x, y));
+                        let num_nbors_are_spaces = nbors.filter(|(x, y)| !board[*x][*y]).count();
+                        if num_nbors_are_spaces == 1 {
+                            Some((x, y))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+            });
+            dead_ends.all(|(x, y)| b.monster_locations[x][y])
+        })
+        .collect::<Vec<_>>();
+    println!("- after filtering out grids with dead ends not containing monsters");
+    dbg!(with_all_dead_ends_containing_monsters.len());
+
+    for soln in with_all_dead_ends_containing_monsters {
+        reprint_grid(&soln, &b);
+        println!();
+    }
+}
+
+fn reprint_grid(grid: &Board, b: &ParsedBoard) {
+    print!(" ");
+    for cc in b.col_constraints {
+        print!("{}", cc);
+    }
+    println!();
+    for y in 0..8 {
+        print!("{}", b.row_constraints[y]);
+        for x in 0..8 {
+            if b.monster_locations[x][y] {
+                print!("m");
+            } else {
+                if grid[x][y] {
+                    print!("#");
+                } else {
+                    print!(".");
+                }
+            }
+        }
+        println!();
+    }
 }
 
 #[derive(Debug)]
