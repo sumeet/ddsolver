@@ -54,19 +54,23 @@ fn main() {
             continue;
         }
 
-        for next_col in &PERMS[col_constraints[q_item.len()] as usize] {
+        let x = q_item.len();
+        for next_col in &PERMS[col_constraints[x] as usize] {
             let mut next_q_item = q_item;
+
+            for (y, &cell) in next_col.iter().enumerate() {
+                if b.treasure_locations[x][y] || b.monster_locations[x][y] {
+                    continue;
+                }
+            }
+
             next_q_item.push(*next_col);
 
             if row_constraints
                 .into_iter()
                 .enumerate()
-                .all(|(row_index, constraint)| {
-                    next_q_item
-                        .iter()
-                        .map(|col| col[row_index] as u8)
-                        .sum::<u8>()
-                        <= constraint
+                .all(|(y, constraint)| {
+                    next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
                 })
             {
                 q.push(next_q_item);
@@ -82,24 +86,8 @@ fn main() {
     println!("- after filtering out non-contiguous grids");
     dbg!(contiguous.len());
 
-    // filter out grids that contain monsters where there are walls
-    let (monsters_filtered_out, _monsters_overlapping): (Vec<_>, Vec<_>) =
-        contiguous.into_iter().partition(|board| {
-            board.iter().enumerate().all(|(x, col)| {
-                col.into_iter().enumerate().all(|(y, &cell)| {
-                    if cell {
-                        !b.monster_locations[x][y]
-                    } else {
-                        true
-                    }
-                })
-            })
-        });
-    println!("- after filtering out grids with walls overlapping monster positions");
-    dbg!(monsters_filtered_out.len());
-
     // keep only grids with monsters in dead ends
-    let with_monsters_in_dead_ends = monsters_filtered_out
+    let with_monsters_in_dead_ends = contiguous
         .into_iter()
         .filter(|board| {
             b.all_monster_positions().all(|monster_pos| {
@@ -172,6 +160,7 @@ struct ParsedBoard {
     col_constraints: [u8; 8],
     row_constraints: [u8; 8],
     monster_locations: [[bool; 8]; 8],
+    treasure_locations: [[bool; 8]; 8],
 }
 
 impl ParsedBoard {
@@ -185,6 +174,7 @@ impl ParsedBoard {
         }
         let mut row_constraints = [0; 8];
         let mut monster_locations = [[false; 8]; 8];
+        let mut treasure_locations = [[false; 8]; 8];
         for (y, line) in lines.enumerate() {
             let mut chars = line.trim().chars();
             let first_char = chars.next().unwrap();
@@ -192,6 +182,8 @@ impl ParsedBoard {
             for (x, rest) in chars.enumerate() {
                 if rest == 'm' {
                     monster_locations[x][y] = true;
+                } else if rest == 't' {
+                    treasure_locations[x][y] = true;
                 }
             }
         }
@@ -199,6 +191,7 @@ impl ParsedBoard {
             col_constraints,
             row_constraints,
             monster_locations,
+            treasure_locations,
         }
     }
 
