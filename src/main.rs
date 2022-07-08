@@ -26,9 +26,23 @@ lazy_static! {
     };
 }
 
+fn empty_board() -> Board {
+    let mut b = Board::new();
+    for _ in 0..8 {
+        b.push([false; 8]);
+    }
+    b
+}
+
 fn main() {
     let s = read_to_string("./5.dd").unwrap();
     let b = ParsedBoard::parse(&s);
+
+    println!("loaded grid:");
+    reprint_grid(&empty_board(), &b);
+    println!();
+    println!("solving...");
+
     let col_constraints = b.col_constraints;
     let row_constraints = b.row_constraints;
 
