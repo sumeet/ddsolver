@@ -35,7 +35,7 @@ fn empty_board() -> Board {
 }
 
 fn main() {
-    let s = read_to_string("./5.dd").unwrap();
+    let s = read_to_string("./6.dd").unwrap();
     let b = ParsedBoard::parse(&s);
 
     println!("loaded grid:");
@@ -59,7 +59,8 @@ fn main() {
             let mut next_q_item = q_item;
 
             for (y, &cell) in next_col.iter().enumerate() {
-                if b.treasure_locations[x][y] || b.monster_locations[x][y] {
+                // we can't put a wall where there's a treasure or monster
+                if cell && (b.treasure_locations[x][y] || b.monster_locations[x][y]) {
                     continue;
                 }
             }
@@ -143,6 +144,8 @@ fn reprint_grid(grid: &Board, b: &ParsedBoard) {
         for x in 0..8 {
             if b.monster_locations[x][y] {
                 print!("m");
+            } else if b.treasure_locations[x][y] {
+                print!("t");
             } else {
                 if grid[x][y] {
                     print!("#");
