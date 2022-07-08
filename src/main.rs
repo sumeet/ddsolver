@@ -1,7 +1,7 @@
 #![feature(bool_to_option)]
 
 use lazy_static::lazy_static;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::fs::read_to_string;
 use tinyvec::ArrayVec;
@@ -48,36 +48,79 @@ fn main() {
 
     let mut q = vec![Board::new()];
     let mut found = vec![];
-    while let Some(q_item) = q.pop() {
-        if q_item.len() == 8 {
-            found.push(q_item);
-            continue;
-        }
-
-        let x = q_item.len();
-        for next_col in &PERMS[col_constraints[x] as usize] {
-            let mut next_q_item = q_item;
-
-            for (y, &cell) in next_col.iter().enumerate() {
-                // we can't put a wall where there's a treasure or monster
-                if cell && (b.treasure_locations[x][y] || b.monster_locations[x][y]) {
-                    continue;
+    while !q.is_empty() {
+        (q, found) = q
+            .par_iter()
+            .fold_with((vec![], found), |(mut q, mut found), &q_item| {
+                if q_item.len() == 8 {
+                    found.push(q_item);
+                    return (q, found);
                 }
-            }
 
-            next_q_item.push(*next_col);
+                let x = q_item.len();
+                for next_col in &PERMS[col_constraints[x] as usize] {
+                    let mut next_q_item = q_item;
 
-            if row_constraints
-                .into_iter()
-                .enumerate()
-                .all(|(y, constraint)| {
-                    next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
-                })
-            {
-                q.push(next_q_item);
-            }
-        }
+                    for (y, &cell) in next_col.iter().enumerate() {
+                        // we can't put a wall where there's a treasure or monster
+                        if cell && (b.treasure_locations[x][y] || b.monster_locations[x][y]) {
+                            continue;
+                        }
+                    }
+                    next_q_item.push(*next_col);
+
+                    if row_constraints
+                        .into_iter()
+                        .enumerate()
+                        .all(|(y, constraint)| {
+                            next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
+                        })
+                    {
+                        q.push(next_q_item);
+                    }
+                }
+
+                (q, found)
+            })
+            .reduce(
+                || (vec![], vec![]),
+                |(mut q_a, mut found_a), (q_b, found_b)| {
+                    q_a.extend(q_b);
+                    found_a.extend(found_b);
+                    (q_a, found_a)
+                },
+            );
     }
+    // while let Some(q_item) = q.pop() {
+    //     if q_item.len() == 8 {
+    //         found.push(q_item);
+    //         continue;
+    //     }
+    //
+    //     let x = q_item.len();
+    //     for next_col in &PERMS[col_constraints[x] as usize] {
+    //         let mut next_q_item = q_item;
+    //
+    //         for (y, &cell) in next_col.iter().enumerate() {
+    //             // we can't put a wall where there's a treasure or monster
+    //             if cell && (b.treasure_locations[x][y] || b.monster_locations[x][y]) {
+    //                 continue;
+    //             }
+    //         }
+    //
+    //         next_q_item.push(*next_col);
+    //
+    //         if row_constraints
+    //             .into_iter()
+    //             .enumerate()
+    //             .all(|(y, constraint)| {
+    //                 next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
+    //             })
+    //         {
+    //             q.push(next_q_item);
+    //         }
+    //     }
+    // }
     println!("- after filtering col and row constraints");
     dbg!(found.len());
 
