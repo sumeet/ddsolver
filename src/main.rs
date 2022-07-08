@@ -1,8 +1,9 @@
+#![feature(bool_to_option)]
+
 use lazy_static::lazy_static;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::fs::read_to_string;
-use std::mem::MaybeUninit;
 use tinyvec::ArrayVec;
 
 lazy_static! {
@@ -33,7 +34,7 @@ fn main() {
 
     let mut q = vec![Board::new()];
     let mut found = vec![];
-    while let Some(mut q_item) = q.pop() {
+    while let Some(q_item) = q.pop() {
         if q_item.len() == 8 {
             found.push(q_item);
             continue;
@@ -68,7 +69,7 @@ fn main() {
     dbg!(contiguous.len());
 
     // filter out grids that contain monsters where there are walls
-    let (monsters_filtered_out, monsters_overlapping): (Vec<_>, Vec<_>) =
+    let (monsters_filtered_out, _monsters_overlapping): (Vec<_>, Vec<_>) =
         contiguous.into_iter().partition(|board| {
             board.iter().enumerate().all(|(x, col)| {
                 col.into_iter().enumerate().all(|(y, &cell)| {
@@ -82,10 +83,20 @@ fn main() {
         });
     println!("- after filtering out grids with walls overlapping monster positions");
     dbg!(monsters_filtered_out.len());
-    println!("- example of monster not overlapping (GOOD)");
-    print_grid(monsters_filtered_out[0]);
-    println!("- example of monster overlapping (BAD)");
-    print_grid(monsters_overlapping[0]);
+
+    // keep only grids with monsters in dead ends
+    let with_monsters_in_dead_ends = monsters_filtered_out
+        .into_iter()
+        .filter(|board| {
+            b.all_monster_positions().all(|monster_pos| {
+                let nbors = neighbors(monster_pos);
+                let num_nbors_are_spaces = nbors.filter(|(x, y)| !board[*x][*y]).count();
+                num_nbors_are_spaces == 1
+            })
+        })
+        .collect::<Vec<_>>();
+    println!("- after filtering out grids with monsters not in dead ends");
+    dbg!(with_monsters_in_dead_ends.len());
 }
 
 #[derive(Debug)]
@@ -122,6 +133,17 @@ impl ParsedBoard {
             monster_locations,
         }
     }
+
+    fn all_monster_positions(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.monster_locations
+            .iter()
+            .enumerate()
+            .flat_map(|(x, col)| {
+                col.iter()
+                    .enumerate()
+                    .filter_map(move |(y, &cell)| cell.then_some((x, y)))
+            })
+    }
 }
 
 enum Space {
@@ -133,8 +155,16 @@ enum Space {
 
 type Board = ArrayVec<[[bool; 8]; 8]>;
 
+fn neighbors((x, y): (usize, usize)) -> impl Iterator<Item = (usize, usize)> {
+    let (x, y) = (x as isize, y as isize);
+    [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+        .into_iter()
+        .filter(|&(x, y)| x >= 0 && y >= 0 && x < 8 && y < 8)
+        .map(|(x, y)| (x as _, y as _))
+}
+
 fn is_contiguous(b: Board) -> bool {
-    let mut all_space_coordinates = b
+    let all_space_coordinates = b
         .iter()
         .enumerate()
         .flat_map(|(x, col)| {
@@ -155,17 +185,9 @@ fn is_contiguous(b: Board) -> bool {
         if all_space_coordinates.contains(&(x, y)) {
             found_spaces.insert((x, y));
         }
-        for (dx, dy) in &[(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
-            let (nx, ny) = ((x as isize + dx) as isize, (y as isize + dy) as isize);
-            if nx >= 0
-                && nx < 8
-                && ny >= 0
-                && ny < 8
-                && all_space_coordinates.contains(&(nx as _, ny as _))
-            {
-                if !visited.contains(&(nx as _, ny as _)) {
-                    to_visit.push((nx as _, ny as _));
-                }
+        for (nx, ny) in neighbors((x, y)) {
+            if all_space_coordinates.contains(&(nx, ny)) && !visited.contains(&(nx, ny)) {
+                to_visit.push((nx, ny));
             }
         }
     }
@@ -188,14 +210,3 @@ fn print_grid(cols: ArrayVec<[[bool; 8]; 8]>) {
         println!();
     }
 }
-
-// SCRATCH:
-// use std::collections::HashSet;
-// struct GuessingBoard {
-//     constraints: HashSet<Constraint>,
-// }
-//
-// type SpaceCoord = (u8, u8);
-//
-// enum SpaceConstraint {}
-//
