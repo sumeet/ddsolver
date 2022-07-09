@@ -40,7 +40,7 @@ fn empty_board() -> Board {
 }
 
 fn main() {
-    let s = read_to_string("./5.dd").unwrap();
+    let s = read_to_string("./6.dd").unwrap();
     let b = ParsedBoard::parse(&s);
 
     println!("loaded grid:");
@@ -265,12 +265,6 @@ fn is_contiguous(b: Board) -> bool {
         }
     }
 
-    for unfilled_x in b.len()..8 {
-        for y in 0..8 {
-            board_bits_view.set(unfilled_x * 8 + y, false);
-        }
-    }
-
     // start at one space, and see if we can get to the rest of them. if so, then we got it
     let mut found_spaces_bits = 0u64;
     let mut found_spaces_bits_view = found_spaces_bits.view_bits_mut::<Lsb0>();
@@ -283,10 +277,11 @@ fn is_contiguous(b: Board) -> bool {
         if !board_bits_view[i] {
             found_spaces_bits_view.set(i, true);
         }
-        let (x, y) = (i / 8, i % 8); // XXX: this might be backwards
+        let (x, y) = (i / 8, i % 8);
         for (nx, ny) in neighbors((x, y)) {
-            if !board_bits_view[nx * 8 + ny] && !visited_bits_view[nx * 8 + ny] {
-                to_visit.push(nx * 8 + ny);
+            let ni = nx * 8 + ny;
+            if !board_bits_view[ni] && !visited_bits_view[ni] {
+                to_visit.push(ni);
             }
         }
     }
