@@ -1,10 +1,15 @@
 #![feature(bool_to_option)]
 
+use bitvec::field::BitField;
+use bitvec::macros::internal::funty::Fundamental;
+use bitvec::order::Lsb0;
+use bitvec::prelude::{BitStore, BitVec};
+use bitvec::view::BitView;
 use lazy_static::lazy_static;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::fs::read_to_string;
-use tinyvec::ArrayVec;
+use tinyvec::{array_vec, ArrayVec};
 
 lazy_static! {
     static ref PERMS: Vec<Vec<[bool; 8]>> = {
@@ -35,7 +40,7 @@ fn empty_board() -> Board {
 }
 
 fn main() {
-    let s = read_to_string("./6.dd").unwrap();
+    let s = read_to_string("./5.dd").unwrap();
     let b = ParsedBoard::parse(&s);
 
     println!("loaded grid:");
@@ -49,6 +54,7 @@ fn main() {
     let mut q = vec![Board::new()];
     let mut found = vec![];
     while !q.is_empty() {
+        println!("q.length: {}", q.len());
         (q, found) = q
             .par_iter()
             .fold_with((vec![], found), |(mut q, mut found), &q_item| {
@@ -68,6 +74,10 @@ fn main() {
                         }
                     }
                     next_q_item.push(*next_col);
+
+                    if !is_contiguous(next_q_item) {
+                        continue;
+                    }
 
                     if row_constraints
                         .into_iter()
@@ -91,47 +101,17 @@ fn main() {
                 },
             );
     }
-    // while let Some(q_item) = q.pop() {
-    //     if q_item.len() == 8 {
-    //         found.push(q_item);
-    //         continue;
-    //     }
-    //
-    //     let x = q_item.len();
-    //     for next_col in &PERMS[col_constraints[x] as usize] {
-    //         let mut next_q_item = q_item;
-    //
-    //         for (y, &cell) in next_col.iter().enumerate() {
-    //             // we can't put a wall where there's a treasure or monster
-    //             if cell && (b.treasure_locations[x][y] || b.monster_locations[x][y]) {
-    //                 continue;
-    //             }
-    //         }
-    //
-    //         next_q_item.push(*next_col);
-    //
-    //         if row_constraints
-    //             .into_iter()
-    //             .enumerate()
-    //             .all(|(y, constraint)| {
-    //                 next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
-    //             })
-    //         {
-    //             q.push(next_q_item);
-    //         }
-    //     }
-    // }
     println!("- after filtering col and row constraints");
     dbg!(found.len());
 
-    // filter out non-contiguous grids
-    let (contiguous, _noncontiguous): (Vec<Board>, Vec<Board>) =
-        found.into_par_iter().partition(|grid| is_contiguous(*grid));
-    println!("- after filtering out non-contiguous grids");
-    dbg!(contiguous.len());
+    //// filter out non-contiguous grids
+    //let (contiguous, _noncontiguous): (Vec<Board>, Vec<Board>) =
+    //    found.into_par_iter().partition(|grid| is_contiguous(*grid));
+    //println!("- after filtering out non-contiguous grids");
+    //dbg!(contiguous.len());
 
     // keep only grids with monsters in dead ends
-    let with_monsters_in_dead_ends = contiguous
+    let with_monsters_in_dead_ends = found
         .into_iter()
         .filter(|board| {
             b.all_monster_positions().all(|monster_pos| {
@@ -271,35 +251,46 @@ fn neighbors((x, y): (usize, usize)) -> impl Iterator<Item = (usize, usize)> {
 }
 
 fn is_contiguous(b: Board) -> bool {
-    let all_space_coordinates = b
-        .iter()
-        .enumerate()
-        .flat_map(|(x, col)| {
-            col.iter()
-                .enumerate()
-                .map(move |(y, &cell)| if !cell { Some((x, y)) } else { None })
-        })
-        .flatten()
-        .collect::<HashSet<(usize, usize)>>();
+    let mut board_bits = 0u64;
+    let mut any_open_cell = None;
+    let board_bits_view = board_bits.view_bits_mut::<Lsb0>();
 
-    // start at one space, and see if we can get to the rest of them. if so, then we got it
-    let mut found_spaces = HashSet::new();
-    let mut visited = HashSet::new();
-    let mut to_visit = vec![all_space_coordinates.iter().copied().next().unwrap()];
-    while let Some((x, y)) = to_visit.pop() {
-        visited.insert((x, y));
-
-        if all_space_coordinates.contains(&(x, y)) {
-            found_spaces.insert((x, y));
-        }
-        for (nx, ny) in neighbors((x, y)) {
-            if all_space_coordinates.contains(&(nx, ny)) && !visited.contains(&(nx, ny)) {
-                to_visit.push((nx, ny));
+    for (x, col) in b.iter().enumerate() {
+        for (y, &cell) in col.iter().enumerate() {
+            if cell {
+                board_bits_view.set(x * 8 + y, true);
+            } else {
+                any_open_cell = Some(x * 8 + y);
             }
         }
     }
 
-    all_space_coordinates.intersection(&found_spaces).count() == all_space_coordinates.len()
+    for unfilled_x in b.len()..8 {
+        for y in 0..8 {
+            board_bits_view.set(unfilled_x * 8 + y, false);
+        }
+    }
+
+    // start at one space, and see if we can get to the rest of them. if so, then we got it
+    let mut found_spaces_bits = 0u64;
+    let mut found_spaces_bits_view = found_spaces_bits.view_bits_mut::<Lsb0>();
+    let mut visited_bits = 0u64;
+    let mut visited_bits_view = visited_bits.view_bits_mut::<Lsb0>();
+    let mut to_visit = array_vec![[usize; 64] => any_open_cell.unwrap()];
+    while let Some(i) = to_visit.pop() {
+        visited_bits_view.set(i, true);
+
+        if !board_bits_view[i] {
+            found_spaces_bits_view.set(i, true);
+        }
+        let (x, y) = (i / 8, i % 8); // XXX: this might be backwards
+        for (nx, ny) in neighbors((x, y)) {
+            if !board_bits_view[nx * 8 + ny] && !visited_bits_view[nx * 8 + ny] {
+                to_visit.push(nx * 8 + ny);
+            }
+        }
+    }
+    !found_spaces_bits == board_bits
 }
 
 fn print_grid(cols: ArrayVec<[[bool; 8]; 8]>) {
