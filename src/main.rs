@@ -1,17 +1,35 @@
-#![feature(bool_to_option)]
-
-use bitvec::field::BitField;
-use bitvec::macros::internal::funty::Fundamental;
 use bitvec::order::Lsb0;
-use bitvec::prelude::{BitStore, BitVec};
+use bitvec::prelude::BitStore;
 use bitvec::view::BitView;
 use lazy_static::lazy_static;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::collections::HashSet;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::fs::read_to_string;
 use tinyvec::{array_vec, ArrayVec};
 
 lazy_static! {
+    // // this could be a constant / lazy_static, also unneeded right now
+    // let mut col_masks = [0u64; 8];
+    // for (x, col_mask) in col_masks.iter_mut().enumerate() {
+    //     let col_mask_bits = col_mask.view_bits_mut::<Lsb0>();
+    //     for i in (x * 8)..((x * 8) + 8) {
+    //         col_mask_bits.set(i, true);
+    //     }
+    // }
+    static ref ROW_MASKS : [u64; 8] = {
+       let mut row_masks =  [0u64; 8];
+        for (y, row_mask) in row_masks
+            .iter_mut()
+            .enumerate()
+        {
+            let row_mask_bits = row_mask.view_bits_mut::<Lsb0>();
+            for i in (y * 8)..((y * 8) + 8) {
+                row_mask_bits.set(i, true);
+            }
+        }
+        row_masks
+    };
+
+
     static ref PERMS: Vec<Vec<[bool; 8]>> = {
         fn generate_perms(constraint: u32) -> impl Iterator<Item = u8> {
             (0..=u8::MAX).filter(move |i| i.count_ones() == constraint)
@@ -40,7 +58,7 @@ fn empty_board() -> Board {
 }
 
 fn main() {
-    let s = read_to_string("./6.dd").unwrap();
+    let s = read_to_string("./5.dd").unwrap();
     let b = ParsedBoard::parse(&s);
 
     println!("loaded grid:");
@@ -64,7 +82,7 @@ fn main() {
                 }
 
                 let x = q_item.len();
-                for next_col in &PERMS[col_constraints[x] as usize] {
+                'perm: for next_col in &PERMS[col_constraints[x] as usize] {
                     let mut next_q_item = q_item;
 
                     for (y, &cell) in next_col.iter().enumerate() {
@@ -75,19 +93,47 @@ fn main() {
                     }
                     next_q_item.push(*next_col);
 
-                    if !is_contiguous(next_q_item) {
-                        continue;
+                    let mut board_bits = 0u64;
+                    let mut any_open_cell = None;
+                    let board_bits_view = board_bits.view_bits_mut::<Lsb0>();
+
+                    for (x, col) in next_q_item.iter().enumerate() {
+                        for (y, &cell) in col.iter().enumerate() {
+                            if cell {
+                                board_bits_view.set(x * 8 + y, true);
+                            } else {
+                                any_open_cell = Some(x * 8 + y);
+                            }
+                        }
                     }
 
+                    // check row constraints (we don't need to check col constraints because we
+                    // generate PERMS using those to begin with)
+                    // for max_x in 0..next_q_item.len() {
+                    //     for (x, row_mask) in (&ROW_MASKS[0..max_x]).iter().enumerate() {
+                    //         if (row_mask & board_bits).count_ones() as u8 > row_constraints[x] {
+                    //             continue 'perm;
+                    //         }
+                    //     }
+                    // }
+
+                    // // old (slow?) method
                     if row_constraints
                         .into_iter()
                         .enumerate()
-                        .all(|(y, constraint)| {
-                            next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() <= constraint
+                        .any(|(y, constraint)| {
+                            next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() > constraint
                         })
                     {
-                        q.push(next_q_item);
+                        continue 'perm;
                     }
+
+                    // check contiguity last, i think it's the slowest
+                    if !is_contiguous(board_bits, any_open_cell.unwrap()) {
+                        continue;
+                    }
+
+                    q.push(next_q_item);
                 }
 
                 (q, found)
@@ -131,14 +177,16 @@ fn main() {
             // filter only dead ends
             let mut dead_ends = board.iter().enumerate().flat_map(|(x, col)| {
                 col.into_iter().enumerate().flat_map(move |(y, &cell)| {
-                    if !cell {
-                        let nbors = neighbors((x, y));
-                        let num_nbors_are_spaces = nbors.filter(|(x, y)| !board[*x][*y]).count();
-                        if num_nbors_are_spaces == 1 {
-                            Some((x, y))
-                        } else {
-                            None
-                        }
+                    // a cell with a wall can't be a dead end
+                    if cell {
+                        return None;
+                    }
+
+                    // if a cell is empty, then it is a dead end if it has exactly one empty neighbor
+                    let nbors = neighbors((x, y));
+                    let num_nbors_are_spaces = nbors.filter(|(x, y)| !board[*x][*y]).count();
+                    if num_nbors_are_spaces == 1 {
+                        return Some((x, y));
                     } else {
                         None
                     }
@@ -240,6 +288,7 @@ enum Space {
     Treasure,
 }
 
+// TODO: maybe this should just be a u64
 type Board = ArrayVec<[[bool; 8]; 8]>;
 
 fn neighbors((x, y): (usize, usize)) -> impl Iterator<Item = (usize, usize)> {
@@ -250,27 +299,16 @@ fn neighbors((x, y): (usize, usize)) -> impl Iterator<Item = (usize, usize)> {
         .map(|(x, y)| (x as _, y as _))
 }
 
-fn is_contiguous(b: Board) -> bool {
-    let mut board_bits = 0u64;
-    let mut any_open_cell = None;
-    let board_bits_view = board_bits.view_bits_mut::<Lsb0>();
-
-    for (x, col) in b.iter().enumerate() {
-        for (y, &cell) in col.iter().enumerate() {
-            if cell {
-                board_bits_view.set(x * 8 + y, true);
-            } else {
-                any_open_cell = Some(x * 8 + y);
-            }
-        }
-    }
+fn is_contiguous(board_bits: u64, any_open_cell: usize) -> bool {
+    // TODO: we're constructing this twice, this might be slowing things down
+    let board_bits_view = board_bits.view_bits::<Lsb0>();
 
     // start at one space, and see if we can get to the rest of them. if so, then we got it
     let mut found_spaces_bits = 0u64;
     let mut found_spaces_bits_view = found_spaces_bits.view_bits_mut::<Lsb0>();
     let mut visited_bits = 0u64;
     let mut visited_bits_view = visited_bits.view_bits_mut::<Lsb0>();
-    let mut to_visit = array_vec![[usize; 64] => any_open_cell.unwrap()];
+    let mut to_visit = array_vec![[usize; 64] => any_open_cell];
     while let Some(i) = to_visit.pop() {
         visited_bits_view.set(i, true);
 
