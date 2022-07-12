@@ -1,4 +1,5 @@
-use bitvec::order::Lsb0;
+use bitvec::macros::internal::funty::Fundamental;
+use bitvec::order::{Lsb0, Msb0};
 use bitvec::prelude::BitStore;
 use bitvec::view::BitView;
 use lazy_static::lazy_static;
@@ -21,9 +22,10 @@ lazy_static! {
             .iter_mut()
             .enumerate()
         {
-            let row_mask_bits = row_mask.view_bits_mut::<Lsb0>();
-            for i in (y * 8)..((y * 8) + 8) {
-                row_mask_bits.set(i, true);
+            // HMM weird, not sure why we need Msb0 here??
+            let row_mask_bits = row_mask.view_bits_mut::<Msb0>();
+            for x in 0..8 {
+                row_mask_bits.set(y + (x * 8), true);
             }
         }
         row_masks
@@ -109,15 +111,27 @@ fn main() {
 
                     // check row constraints (we don't need to check col constraints because we
                     // generate PERMS using those to begin with)
-                    // for max_x in 0..next_q_item.len() {
-                    //     for (x, row_mask) in (&ROW_MASKS[0..max_x]).iter().enumerate() {
-                    //         if (row_mask & board_bits).count_ones() as u8 > row_constraints[x] {
-                    //             continue 'perm;
-                    //         }
+                    let mut new_method = true;
+                    if ROW_MASKS.into_iter().zip(row_constraints).any(
+                        |(row_mask, row_constraint)| {
+                            dbg!(row_mask.to_le_bytes().map(|b| format!("{:08b}", b)));
+                            dbg!(board_bits.to_le_bytes().map(|b| format!("{:08b}", b)));
+                            (row_mask & board_bits).count_ones() as u8 > dbg!(row_constraint)
+                        },
+                    ) {
+                        new_method = false;
+                    }
+                    // 'new_method: for (x, row_mask) in (&ROW_MASKS).iter().enumerate() {
+                    //     if (row_mask & board_bits).count_ones() as u8 > row_constraints[x] {
+                    //         new_method = false;
+                    //         break 'new_method;
+                    //         continue 'perm;
                     //     }
                     // }
 
                     // // old (slow?) method
+                    let mut old_method = true;
+                    dbg!(next_q_item);
                     if row_constraints
                         .into_iter()
                         .enumerate()
@@ -125,6 +139,15 @@ fn main() {
                             next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() > constraint
                         })
                     {
+                        new_method = false;
+                        // continue 'perm;
+                    }
+
+                    if dbg!(new_method) != dbg!(old_method) {
+                        panic!("mismatch");
+                    }
+
+                    if !new_method || !old_method {
                         continue 'perm;
                     }
 
