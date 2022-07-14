@@ -111,16 +111,16 @@ fn main() {
 
                     // check row constraints (we don't need to check col constraints because we
                     // generate PERMS using those to begin with)
-                    let mut new_method = true;
-                    if ROW_MASKS.into_iter().zip(row_constraints).any(
-                        |(row_mask, row_constraint)| {
-                            dbg!(row_mask.to_le_bytes().map(|b| format!("{:08b}", b)));
-                            dbg!(board_bits.to_le_bytes().map(|b| format!("{:08b}", b)));
-                            (row_mask & board_bits).count_ones() as u8 > dbg!(row_constraint)
-                        },
-                    ) {
-                        new_method = false;
-                    }
+                    // let mut new_method = true;
+                    // if ROW_MASKS.into_iter().zip(row_constraints).any(
+                    //     |(row_mask, row_constraint)| {
+                    //         dbg!(row_mask.to_le_bytes().map(|b| format!("{:08b}", b)));
+                    //         dbg!(board_bits.to_le_bytes().map(|b| format!("{:08b}", b)));
+                    //         (row_mask & board_bits).count_ones() as u8 > dbg!(row_constraint)
+                    //     },
+                    // ) {
+                    //     new_method = false;
+                    // }
                     // 'new_method: for (x, row_mask) in (&ROW_MASKS).iter().enumerate() {
                     //     if (row_mask & board_bits).count_ones() as u8 > row_constraints[x] {
                     //         new_method = false;
@@ -131,7 +131,7 @@ fn main() {
 
                     // // old (slow?) method
                     let mut old_method = true;
-                    dbg!(next_q_item);
+                    next_q_item;
                     if row_constraints
                         .into_iter()
                         .enumerate()
@@ -139,15 +139,16 @@ fn main() {
                             next_q_item.iter().map(|col| col[y] as u8).sum::<u8>() > constraint
                         })
                     {
-                        new_method = false;
+                        old_method = false;
                         // continue 'perm;
                     }
 
-                    if dbg!(new_method) != dbg!(old_method) {
-                        panic!("mismatch");
-                    }
+                    // if dbg!(new_method) != dbg!(old_method) {
+                    //     panic!("mismatch");
+                    // }
 
-                    if !new_method || !old_method {
+                    // if !new_method || !old_method {
+                    if !old_method {
                         continue 'perm;
                     }
 
